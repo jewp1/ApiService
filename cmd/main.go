@@ -6,6 +6,7 @@ import (
 	"ApiService/internal/logger"
 	"ApiService/internal/repo"
 	"ApiService/internal/service"
+	"context"
 	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/pkg/errors"
@@ -26,7 +27,7 @@ func main() {
 		log.Fatal(errors.Wrap(err, "fail to load config"))
 	}
 
-	newRepository, err := repo.NewRepo()
+	newRepository, err := repo.NewRepo(context.Background(), cfg.PostgreSQL)
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "fail to init repository"))
 	}
@@ -38,11 +39,11 @@ func main() {
 
 	newService := service.NewService(newRepository, logger)
 
-	app := api.NewRouter(&api.Router{Service: newService}, cfg.Token)
+	app := api.NewRouter(&api.Router{Service: newService}, cfg.Rest.Token)
 
 	go func() {
-		logger.Infof("Starting http server on %s", cfg.ListenAddr)
-		if err := app.Listen(cfg.ListenAddr); err != nil {
+		logger.Infof("Starting http server on %s", cfg.Rest.ListenAddr)
+		if err := app.Listen(cfg.Rest.ListenAddr); err != nil {
 			logger.Fatal(err, "error while starting http server")
 		}
 	}()

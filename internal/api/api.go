@@ -19,10 +19,12 @@ func NewRouter(r *Router, token string) *fiber.App {
 		ExposeHeaders: "Link",
 		MaxAge:        300,
 	}))
+	app.Get("/task/:username", r.Service.GetTasksByUsername)
+	app.Get("/taskID/:id", r.Service.GetTaskById)
+	app.Post("/user", r.Service.CreateUser)
 	app.Post("/task", r.Service.CreateTask)
-	app.Get("/tasks", r.Service.GetTasks)
-	app.Get("/task/:id", r.Service.GetTaskById)
 	app.Put("/task/:id", r.Service.UpdateTask)
 	app.Delete("/task/:id", r.Service.DeleteTask)
+	app.Delete("/user/:user_id", r.Service.DeleteUser)
 	return app
 }

@@ -1,77 +1,152 @@
 package repo
 
 import (
-	"errors"
-	"sync"
+	"ApiService/internal/config"
+	"context"
+	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pkg/errors"
+	"time"
 )
 
 type Task struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Id          int       `json:"id, omitempty"`
+	UserId      int       `json:"userId"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"`
+	CreateAt    time.Time `json:"createAt"`
 }
 
-type inMemoryCache struct {
-	currentId int
-	items     map[int]*Task
-	mu        sync.RWMutex
+type User struct {
+	Id       int    `json:"id"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type repository struct {
+	pool *pgxpool.Pool
 }
 
 type Repository interface {
-	CreateTask(task Task) (int, error)
-	GetTasks() (map[int]*Task, error)
-	GetTaskById(id int) (Task, error)
-	UpdateTask(id int, task Task) (int, error)
-	DeleteTask(id int) (int, error)
+	CreateTask(ctx context.Context, task Task) (int, error)
+	GetTaskById(ctx context.Context, id int) (Task, error)
+	UpdateTask(ctx context.Context, id int, task Task) (int, error)
+	DeleteTask(ctx context.Context, id int) (int, error)
+	CreateUser(ctx context.Context, user User) (int, error)
+	GetTasksByUsername(ctx context.Context, username string) ([]Task, error)
+	CheckUserExists(ctx context.Context, userId int) (bool, error)
+	DeleteUser(ctx context.Context, userId int) (int, error)
 }
 
-func NewRepo() (Repository, error) {
+func NewRepo(ctx context.Context, cfg config.PostgreSQL) (Repository, error) {
+	connString := fmt.Sprintf(
+		`user=%s password=%s host=%s port=%d dbname=%s sslmode=%s 
+        pool_max_conns=%d pool_max_conn_lifetime=%s pool_max_conn_idle_time=%s`,
+		cfg.User,
+		cfg.Password,
+		cfg.Host,
+		cfg.Port,
+		cfg.Name,
+		cfg.SSLMode,
+		cfg.PoolSize,
+		cfg.PoolConnLifeTime.String(),
+		cfg.PoolMaxConnIdleTime.String(),
+	)
+
+	conf, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to parse db config")
+	}
+
+	conf.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+
+	pool, err := pgxpool.NewWithConfig(ctx, conf)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create poll")
+	}
+
+	return &repository{pool}, nil
+}
+
+func (r *repository) CheckUserExists(ctx context.Context, userId int) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, CheckUser, userId).Scan(&exists)
+	if err != nil {
+		return false, errors.Wrap(err, "unable to check user exists")
+	}
+	return exists, nil
+}
+
+func (r *repository) CreateTask(ctx context.Context, task Task) (int, error) {
 	var id int
-	return &inMemoryCache{items: make(map[int]*Task), currentId: id}, nil
-}
-
-func (cache *inMemoryCache) CreateTask(task Task) (int, error) {
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	cache.currentId++
-	_, ok := cache.items[cache.currentId]
-	if ok {
-		return cache.currentId, errors.New("task already exists")
+	err := r.pool.QueryRow(ctx, CreateTask, task.UserId, task.Title, task.Description).Scan(&id)
+	if err != nil {
+		return 0, errors.Wrap(err, "unable to create task")
 	}
-	cache.items[cache.currentId] = &task
-	return cache.currentId, nil
-}
-func (cache *inMemoryCache) GetTasks() (map[int]*Task, error) {
-	cache.mu.RLock()
-	defer cache.mu.RUnlock()
-	if len(cache.items) == 0 {
-		return nil, errors.New("tasks not found")
-	}
-	return cache.items, nil
-}
-
-func (cache *inMemoryCache) GetTaskById(id int) (Task, error) {
-	cache.mu.RLock()
-	defer cache.mu.RUnlock()
-	if task, ok := cache.items[id]; ok {
-		return *task, nil
-	}
-	return Task{}, errors.New("task not found")
-}
-func (cache *inMemoryCache) UpdateTask(id int, newTask Task) (int, error) {
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if _, ok := cache.items[id]; !ok {
-		return 0, errors.New("task not found")
-	}
-	cache.items[id] = &newTask
 	return id, nil
 }
-func (cache *inMemoryCache) DeleteTask(id int) (int, error) {
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if _, ok := cache.items[id]; !ok {
-		return 0, errors.New("task not found")
+
+func (r *repository) CreateUser(ctx context.Context, user User) (int, error) {
+	var id int
+	err := r.pool.QueryRow(ctx, CreateUser, user.Username, user.Password).Scan(&id)
+	if err != nil {
+		return 0, errors.Wrap(err, "user exists")
 	}
-	delete(cache.items, id)
-	return 0, nil
+	return id, nil
+}
+
+func (r *repository) GetTasksByUsername(ctx context.Context, username string) ([]Task, error) {
+	var tasks []Task
+	rows, err := r.pool.Query(ctx, GetTasksByUsername, username)
+	if err != nil {
+		return tasks, errors.Wrap(err, "unable to get tasks")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var task Task
+		if err := rows.Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Status, &task.CreateAt); err != nil {
+			return nil, errors.Wrap(err, "unable to scan task")
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func (r *repository) GetTaskById(ctx context.Context, id int) (Task, error) {
+	var task Task
+	err := r.pool.QueryRow(ctx, GetTask, id).Scan(&task.Id, &task.UserId, &task.Title, &task.Description, &task.Status, &task.CreateAt)
+	if err != nil {
+		return Task{}, errors.Wrap(err, "unable to get task")
+	}
+	if task.Id == 0 {
+		return Task{}, errors.New("task not found")
+	}
+	return task, nil
+}
+func (r *repository) UpdateTask(ctx context.Context, id int, task Task) (int, error) {
+	var taskId int
+	err := r.pool.QueryRow(ctx, UpdateTask, id, task.Title, task.Description, task.Status, task.UserId).Scan(&taskId)
+	if err != nil {
+		return 0, errors.Wrap(err, "unable to update task")
+	}
+	return taskId, nil
+}
+func (r *repository) DeleteTask(ctx context.Context, id int) (int, error) {
+	var taskId int
+	err := r.pool.QueryRow(ctx, DeleteTask, id).Scan(&taskId)
+	if err != nil {
+		return 0, errors.Wrap(err, "unable to delete task")
+	}
+	return taskId, nil
+}
+
+func (r *repository) DeleteUser(ctx context.Context, userId int) (int, error) {
+	var taskId int
+	err := r.pool.QueryRow(ctx, DeleteUser, userId).Scan(&userId)
+	if err != nil {
+		return 0, errors.Wrap(err, "unable to delete user")
+	}
+	return taskId, nil
 }
