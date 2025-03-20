@@ -2,7 +2,7 @@ package repo
 
 const (
 	CreateTask         = `INSERT INTO tasks (user_id, title, description) VALUES ($1, $2, $3) RETURNING id`
-	GetTask            = `SELECT * FROM tasks WHERE id = $1`
+	GetTask            = `SELECT id, user_id, title, description, status, created_at FROM tasks WHERE id = $1`
 	GetTasksByUsername = `
 	SELECT tasks.*
 	FROM tasks

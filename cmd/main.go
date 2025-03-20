@@ -51,7 +51,14 @@ func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	<-signalChan
-
 	logger.Info("Shutting down gracefully...")
 
+	err = app.Shutdown()
+	if err != nil {
+		logger.Error(err, "error while shutting down gracefully")
+	}
+
+	logger.Info("Closing database connection pool...")
+	newRepository.Close()
+	logger.Info("Server stopped gracefully")
 }

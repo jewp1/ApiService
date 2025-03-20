@@ -38,6 +38,7 @@ type Repository interface {
 	GetTasksByUsername(ctx context.Context, username string) ([]Task, error)
 	CheckUserExists(ctx context.Context, userId int) (bool, error)
 	DeleteUser(ctx context.Context, userId int) (int, error)
+	Close()
 }
 
 func NewRepo(ctx context.Context, cfg config.PostgreSQL) (Repository, error) {
@@ -149,4 +150,10 @@ func (r *repository) DeleteUser(ctx context.Context, userId int) (int, error) {
 		return 0, errors.Wrap(err, "unable to delete user")
 	}
 	return taskId, nil
+}
+
+func (r *repository) Close() {
+	if r.pool != nil {
+		r.pool.Close()
+	}
 }
